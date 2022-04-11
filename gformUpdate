@@ -1,0 +1,365 @@
+<?php
+/**
+ * Plugin Name: Trap Gravity Forms
+ * Plugin URI: https://github.com/shrutikaap/GFORM-CODE.git
+ * Author: Shrutika
+ * Author URI: https://github.com/shrutikaap/GFORM-CODE.git
+ * Description: Collect Gravity forms to Webhook
+ * Version: 0.1.0
+ * License: GPL2
+ * License URL: http://www.gnu.org/licenses/gpl-2.0.txt
+ * text-domain: Rallypay GForm submissionchanges
+*/
+
+defined( 'ABSPATH' ) or die( 'No entry' );
+
+add_action( 'gform_after_submission_3', 'create_merchant_rallypay', 10, 2 );
+add_action( 'gform_after_submission_4', 'update_rallypay_bank', 10, 2 );
+add_filter( 'gform_field_validation_3_44', 'custom_validation_ssn', 10, 4 );
+add_filter( 'gform_field_validation_3_43', 'custom_validation_ein', 10, 4 );
+//date format
+//method for SSN validation
+
+function custom_validation_ssn( $result, $value, $form, $field ) {
+    // Must be in format AAA-GG-SSSS or AAAGGSSSS
+    if ( ! preg_match("/^([0-9]{9}|[0-9]{3}-[0-9]{2}-[0-9]{4})$/", $value)) {
+        $result['is_valid'] = false;
+        $result['message'] = 'Please enter a valid SSN';
+    }
+    // Split groups into an array
+    $ssnFormatted = (strlen($value) == 9) ? preg_replace("/^([0-9]{3})([0-9]{2})([0-9]{4})$/", "$1-$2-$3", $value) : $value;
+    $ssn_array = explode('-', $ssnFormatted);
+    // number groups must follow these rules:
+    // * no single group can have all 0's
+    // * first group cannot be 666, 900-999
+    // * second group must be 01-99
+    // * third group must be 0001-9999
+    foreach ($ssn_array as $group) {
+        if ($group == 0) {
+              $result['is_valid'] = false;
+              $result['message'] = 'Please enter a valid SSN';
+        }
+    }
+    if (($ssn_array[0] == 666 || $ssn_array[0] > 899 || $ssn_array[1] == "00" || $ssn_array[2] == "0000") || ($ssn_array[0] == "012" && $ssn_array[1] == 34 && $ssn_array[2] == 5678) || ($ssn_array[0] == 123 && $ssn_array[1] == 45 && $ssn_array[2] == 6789)) {
+         $result['is_valid'] = false;
+         $result['message'] = 'Please enter a valid SSN';
+    }
+    $ssn_array2 = str_split($ssnFormatted);
+    $count = 0;
+    foreach ($ssn_array2 as $ssnchar) {
+       $count = $count +1;
+        if($ssnchar != "-" && $ssn_array2[0] != $ssnchar){
+             break;
+        }
+        if($count == 11){
+         $result['is_valid'] = false;
+         $result['message'] = 'Please enter a valid SSN';
+        }
+    }
+    return $result;
+}
+
+//method for EINvalidation
+function custom_validation_ein( $result, $value, $form, $field ) {
+    // Must be in format AAA-GG-SSSS or AAAGGSSSS
+    if ( ! preg_match("/^([0-9]{9}|[0-9]{2}-[0-9]{7})$/", $value)) {
+        $result['is_valid'] = false;
+        $result['message'] = 'Please enter a valid EIN';
+    }
+    // Split groups into an array
+    $ssnFormatted = (strlen($value) == 9) ? preg_replace("/^([0-9]{2})([0-9]{7})$/", "$1-$2", $value) : $value;
+   
+    if ($ssnFormatted == "12-3456789" || $ssnFormatted == "01-2345678") {
+         $result['is_valid'] = false;
+         $result['message'] = 'Please enter a valid EIN';
+    }
+    $ssn_array2 = str_split($ssnFormatted);
+    $count = 0;
+    foreach ($ssn_array2 as $ssnchar) {
+       $count = $count +1;
+        if($ssnchar != "-" && $ssn_array2[0] != $ssnchar){
+             break;
+        }
+        if($count == 10){
+         $result['is_valid'] = false;
+         $result['message'] = 'Please enter a valid EIN';
+        }
+    }
+    return $result;
+}
+
+function update_rallypay_bank( $entry, $form ) 
+{
+    error_log( print_r( $entry, true ) );
+	
+		 $requestbody = json_encode(array(
+				'default'=> true,
+				'bank_name'=> $entry[1],
+				'description'=> $entry[2],
+				'routing_number'=> $entry[6],
+				'account_number' => $entry[7]
+			));
+		
+	
+		$user_id = $entry[5]; 
+		global $wpdb;
+	$client_id_bank = $wpdb->get_results( "SELECT client_id,api_token FROM merchant_registration where user_id =".$entry[5]." order by id DESC limit 1");
+	
+	foreach($client_id_bank as $row){ 
+  	$client_id = $row->client_id;
+  	$api_token = $row->api_token;
+	} 
+	
+
+	error_log( print_r( $client_id_bank, true ) );
+	error_log( print_r( $client_id, true ) );
+	
+	
+	$url = 'https://staging.rallypay.com/v2/bank_accounts';
+    	$requestheaders = array(
+    	'Authorization' => 'Basic ' . base64_encode('sridharl@vitinfotech.com:'.$api_token),
+	'rp-client-id'=> $client_id,
+	'Content-type' => 'application/json',
+	'rp-request-id' => 'eqjkhfdweo9ew'
+);
+	error_log( print_r( $requestbody, true ) );
+	error_log( print_r( $requestheaders, true ) );
+
+	// Make the request to the API.
+	$request  = new WP_Http();
+
+	$response = $request->post( $url, array( 'body' =>  $requestbody,'headers' => $requestheaders ) );
+	error_log( print_r( $response, true ) );
+	
+	//$user_id_bank = $wpdb->get_results( "SELECT meta_value FROM wp_7_gf_entry_meta WHERE meta_key=39");
+
+
+	global $wpdb;
+	
+   
+
+    //$response = wp_remote_post( $url, $args );
+    // Check the response code.
+
+    if ( wp_remote_retrieve_response_code( $response ) != 200 || ( empty( wp_remote_retrieve_body( $response ) ) ) ){
+        // If not a 200, HTTP request failed.
+        //$entries = $body['response'];
+        error_log( print_r( wp_remote_retrieve_response_code( $response ), true ) );
+        $tempres =wp_remote_retrieve_body( $response );
+	  $wpdb->query( "DELETE FROM wp_7_gf_entry_meta WHERE form_id=4 and entry_id = ". $entry['id']);
+
+	  die( 'There was an error attempting to access the API.' . $tempres);
+    }
+	//if ( wp_remote_retrieve_response_code( $response ) == 200 || ( empty( wp_remote_retrieve_body( $response ) ) ) ){
+        //error_log( print_r( wp_remote_retrieve_response_code( $response ), true ) );
+        //$tempres =wp_remote_retrieve_body( $response );
+       
+       // $user_entry_id = $wpdb->get_results( "SELECT entry_id,bank_id FROM bank_details WHERE bank_details.user_id = '$user_id_bank' and bank_id != " .$entry['id']);
+        
+		//$url = 'https://rallypay.com/v2/bank_accounts'.$user_entry_id ->bank_id;
+    	//$requestheaders = array(
+    	//'Authorization' => 'Basic ' . base64_encode('sridharl@vitinfotech.com:'.$api_token),
+		//'rp-client-id'=> $client_id,
+		//'Content-type' => 'application/json',
+		//'rp-request-id' => '39b4c5a7-d730-47af-9c62-ew'
+		//);
+		
+		//$url = 'https://staging.rallypay.com/v2/bank_accounts/'.$user_entry_id ->bank_id;
+      //  $requestheaders = array(
+    //	'Authorization' => 'Basic ' . base64_encode('sridharl@vitinfotech.com:'.$api_token),
+	//    'rp-client-id'=> $client_id,
+	//    'Content-type' => 'application/json',
+	//    'rp-request-id' => 'eqjkhfdweo9ew'
+
+        //);
+		
+		//$request  = new WP_Http();
+
+	      //  $response = $request->delete( $url, array( 'body' =>  $requestbody,'headers' => $requestheaders ) );
+	      //  error_log( print_r( $response, true ) );
+        
+        
+            //$wpdb->query( "DELETE FROM bank_details WHERE bank_details.user_id = '$user_id_bank' and bank_id != " .$entry['id']);
+           // $wpdb->query( "DELETE FROM wp_7_gf_entry_meta WHERE form_id=4 and bank_id = " .$user_entry_id ->entry_id);
+		
+   // }
+    // Result is in the response body and is json encoded.
+    $body = json_decode( wp_remote_retrieve_body( $response ), true );
+    // Check the response body.
+    if( $body['status'] > 202 ){
+        die( "Could not retrieve forms." );
+    }
+    // Entries retrieved successfully.
+    $entries = $body['response'];
+     error_log( print_r('entries are:', true ));
+    error_log( print_r( $entries, true ) );
+
+	global $wpdb;
+		$wpdb->insert(
+			'bank_details',
+				array('bank_id' => $body['id'],
+				'user_id' => $entry[5],
+				'user_email' => $entry[8],
+			)
+		);
+		
+		$bank_id = $body['id'];
+		 error_log( print_r($bank_id, true ) );
+}
+
+function create_merchant_rallypay( $entry, $form ) {
+
+    error_log( print_r( $entry, true ) );
+
+	$dob = DateTime::createFromFormat('Y-m-d', $entry[11]);
+	$dobString = $dob->format('m/d/Y');
+	$orgName = $entry[8];
+	if($entry[4]=='501c3'|| $entry[4]=='501c4')
+	{
+		$orgName =$entry[13];
+	}
+	if($entry[4]=='501c3'|| $entry[4]=='501c4'|| $entry[4]=='Political Organization')
+	{
+		$title = $entry['26.2'];
+		$first_name = $entry['26.3'];	
+		$last_name = $entry['26.6'];
+	}
+	else{
+		$title = $entry['16.2'];
+		$first_name = $entry['16.3'];	
+		$last_name = $entry['16.6'];
+	}
+	$indDetail =array( array(
+       		'name'=> $entry[18],
+            	'individual_registration_number'=>array(
+                'title'=> $title,
+                'first_name'=> $first_name,
+                'last_name'=> $last_name,
+		'date_of_birth'=> $dobString,
+                'ssn_number'=> $entry[44],
+                'phone_number'=> $entry[42],
+		'address_country'=> "US",
+                'address_address1'=> $entry['10.1'],
+                'address_city'=> $entry['10.3'],
+                'address_state'=> $entry['10.4'],
+                'address_zip'=> $entry['10.5']
+		         )
+	 ));
+		
+	if($entry[4]=='501c3'|| $entry[4]=='501c4'|| $entry[4]=='Political Organization')
+	{
+		$indDetail[title] = $entry['26.2'];
+		$indDetail[first_name] = $entry['26.3'];	
+		$indDetail[last_name] = $entry['26.6'];
+	error_log( print_r( $indDetail, true ) );
+	
+
+	$indDetail1=array_pop(array_reverse($indDetail));
+        $requestbody = json_encode(array(
+		'name'=>$entry[40],
+		'individual_registration_number'=>$indDetail1[individual_registration_number],
+		'organization_registration_number'=>array(
+                'organization_name'=> $orgName,
+                'type_of_organization'=> $entry[4],
+                'ein_number' => $entry[43],
+		'phone_number'=> $entry[42],
+		'address_country'=> "US",
+                'address_address1'=> $entry['10.1'],
+                'address_city'=> $entry['10.3'],
+                'address_state'=> $entry['10.4'],
+                'address_zip'=> $entry['10.5']
+		))
+              );
+	}
+	else{
+		$requestbody = json_encode(array_pop(array_reverse($indDetail)));
+	}
+	
+	
+	$url = 'https://staging.rallypay.com/v2/clients';
+    	$requestheaders = array(
+    	'Authorization' => 'Basic ' . 'c3JpZGhhcmxAdml0aW5mb3RlY2guY29tOkluc3RhbnRkaGFyMDk4IQ==',
+    	'Content-type' => 'application/json',
+	'rp-request-id' => '39b4c5a7-d730-47af-9c62-ew'
+	);
+
+	error_log( print_r( $requestbody, true ) );
+	error_log( print_r( $requestheaders, true ) );
+
+	// Make the request to the API.
+	$request  = new WP_Http();
+
+	$response = $request->post( $url, array( 'body' =>  $requestbody,'headers' => $requestheaders ) );
+	error_log( print_r( $response, true ) );
+
+
+	global $wpdb;
+	
+   
+
+    //$response = wp_remote_post( $url, $args );
+    // Check the response code.
+
+    if ( wp_remote_retrieve_response_code( $response ) != 200 || ( empty( wp_remote_retrieve_body( $response ) ) ) ){
+        // If not a 200, HTTP request failed.
+        //$entries = $body['response'];
+        error_log( print_r( wp_remote_retrieve_response_code( $response ), true ) );
+        $tempres =wp_remote_retrieve_body( $response );
+		
+		$wpdb->query( "DELETE FROM wp_7_gf_entry_meta WHERE form_id=3 and entry_id = ". $entry['id']);
+		
+		die( 'There was an error attempting to access the API.' . $tempres);
+    }
+	
+	
+    // Result is in the response body and is json encoded.
+    $body = json_decode( wp_remote_retrieve_body( $response ), true );
+	   error_log( print_r('body is:' .$body, true ) );
+    // Check the response body.
+    if( $body['status'] > 202 ){
+        die( "Could not retrieve forms." );
+    }
+    // Entries retrieved successfully.
+    $entries = $body['response'];
+	error_log( print_r('entries are:', true ));
+    error_log( print_r($entries, true ) );
+
+	
+		//$field = GFFormsModel::get_field( $form, 34);
+		//$field['value']="abc";
+
+		
+		//$form['fields'][] = $field;
+		//GFAPI::update_form( $form );
+
+		//GFAPI::update_entry_property(37, 'client_id', "sampleid" );
+		
+
+		//GFAPI::update_entry_property(37, 'Client Id', "gjkhh" );
+
+		global $wpdb;
+		$wpdb->insert(
+			'merchant_registration',
+				array('page_id' => $body['page_id'],
+				'client_id' => $body['id'],
+				'user_id' => $entry[39],
+				'user_email' => $entry[41],
+				'api_token' => $body['api_token'] 
+			)
+		);
+		
+		$client_id = $body['id'];
+		$page_id = $body['page_id'];
+		 error_log( print_r($page_id, true ) );
+		 error_log( print_r($client_id, true ) );
+
+
+		//$results = $wpdb->get_results( "SELECT * FROM merchant_registration");
+	
+		
+		//$data = json_decode($body, true);
+		//echo   'Client Id : '.$entries['id'] . ', Page Id :  ' .$entries['page_id']
+
+
+		
+}
